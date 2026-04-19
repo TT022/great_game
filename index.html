@@ -13,23 +13,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>NEON SLIDE PRO - 神ゲー</title>
+    <title>NEON SHIFT - 神ゲー</title>
     <style>
         body {
             margin: 0;
             overflow: hidden;
-            background: #050505;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #000; /* フォールバック */
+            font-family: 'Courier New', Courier, monospace; /* 少しレトロなフォント */
             color: white;
             display: flex;
             justify-content: center;
             align-items: center;
             height: 100vh;
             touch-action: manipulation;
+            transition: background 0.5s ease; /* 背景色の変化を滑らかに */
         }
         canvas {
-            border: 2px solid #0ff;
-            box-shadow: 0 0 30px rgba(0, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 0 50px rgba(0, 0, 0, 0.5);
         }
         #ui {
             position: absolute;
@@ -38,23 +39,36 @@
             width: 100%;
         }
         .msg {
-            font-size: 20px;
-            text-shadow: 0 0 10px #0ff;
+            font-size: 22px;
+            text-shadow: 0 0 10px white;
             letter-spacing: 2px;
+            white-space: pre-wrap; /* 改行を有効に */
+        }
+        #score-container {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            text-align: left;
         }
         #score {
             font-size: 60px;
             font-weight: 900;
-            opacity: 0.5;
-            margin-bottom: 20px;
+            line-height: 1;
+        }
+        #level {
+            font-size: 16px;
+            letter-spacing: 3px;
         }
     </style>
 </head>
 <body>
 
     <div id="ui">
-        <div id="score">0</div>
-        <div id="msg" class="msg">CLICK TO START</div>
+        <div id="score-container">
+            <div id="level">PHASE 1</div>
+            <div id="score">0</div>
+        </div>
+        <div id="msg" class="msg">>> CLICK TO START <<</div>
     </div>
     <canvas id="gameCanvas"></canvas>
 
@@ -62,19 +76,41 @@
         const canvas = document.getElementById("gameCanvas");
         const ctx = canvas.getContext("2d");
         const scoreDisplay = document.getElementById("score");
+        const levelDisplay = document.getElementById("level");
         const msg = document.getElementById("msg");
 
-        canvas.width = 400;
-        canvas.height = 600;
+        // スマホ向けにサイズを少し調整
+        const isMobile = window.innerWidth < 500;
+        canvas.width = isMobile ? window.innerWidth * 0.9 : 400;
+        canvas.height = isMobile ? window.innerHeight * 0.8 : 600;
 
         let gameActive = false;
         let score = 0;
         let frameCount = 0;
-        let gameSpeed = 3.5;
+        let gameSpeed = 3.8;
 
+        // --- カラーテーマ (10点ごとに変化) ---
+        // bgTop: 背景グラデーション上, bgBottom: 下, primary: プレイヤー/効果, secondary: 障害物
+        const themes = [
+            { bgTop: "#050505", bgBottom: "#101015", primary: "#0ff", secondary: "#f0f" }, // Phase 1: Cyan / Magenta
+            { bgTop: "#051005", bgBottom: "#102010", primary: "#0f0", secondary: "#ff0" }, // Phase 2: Green / Yellow
+            { bgTop: "#100500", bgBottom: "#201010", primary: "#f00", secondary: "#0ff" }, // Phase 3: Red / Cyan
+            { bgTop: "#050010", bgBottom: "#101020", primary: "#f0f", secondary: "#0f0" }, // Phase 4: Magenta / Green
+            { bgTop: "#101000", bgBottom: "#202010", primary: "#ff0", secondary: "#f0f" }, // Phase 5: Yellow / Magenta
+            { bgTop: "#001010", bgBottom: "#102020", primary: "#fff", secondary: "#333" }  // Phase 6+: White / Dark
+        ];
+        let currentThemeIndex = 0;
+
+        function getTheme() {
+            return themes[Math.min(currentThemeIndex, themes.length - 1)];
+        }
+
+        // --- プレイヤー ---
         let player = {
-            x: 60, y: 300, w: 24, h: 24,
-            gravity: 0.45, velocity: 0, jump: -7.5
+            x: canvas.width * 0.15, 
+            y: canvas.height / 2, 
+            w: 22, h: 22,
+            gravity: 0.48, velocity: 0, jump: -8.0
         };
 
         let obstacles = [];
@@ -83,19 +119,14 @@
         // --- パーティクルクラス ---
         class Particle {
             constructor(x, y, color) {
-                this.x = x;
-                this.y = y;
+                this.x = x; this.y = y;
                 this.size = Math.random() * 4 + 1;
                 this.speedX = (Math.random() - 0.5) * 8;
                 this.speedY = (Math.random() - 0.5) * 8;
                 this.color = color;
                 this.life = 1.0;
             }
-            update() {
-                this.x += this.speedX;
-                this.y += this.speedY;
-                this.life -= 0.02;
-            }
+            update() { this.x += this.speedX; this.y += this.speedY; this.life -= 0.025; }
             draw() {
                 ctx.globalAlpha = this.life;
                 ctx.fillStyle = this.color;
@@ -104,62 +135,92 @@
             }
         }
 
-        function createExplosion(x, y, color) {
-            for (let i = 0; i < 15; i++) {
-                particles.push(new Particle(x, y, color));
-            }
+        function createExplosion(x, y, color, count = 15) {
+            for (let i = 0; i < count; i++) particles.push(new Particle(x, y, color));
         }
 
         // --- ゲームロジック ---
-        function flap() {
+        function flap(e) {
+            // スマホでのスクロール等の防止
+            if(e.type === 'touchstart') e.preventDefault();
+
             if (!gameActive) {
                 resetGame();
                 gameActive = true;
                 msg.innerText = "";
             }
             player.velocity = player.jump;
-            // ジャンプ時に少しパーティクルを出す
-            for(let i=0; i<3; i++) particles.push(new Particle(player.x, player.y + player.h, "#0ff"));
+            // ジャンプ時はSecondaryカラーのパーティクル
+            createExplosion(player.x, player.y + player.h, getTheme().secondary, 2);
         }
 
+        // イベントリスナー（PC/スマホ両対応）
         window.addEventListener("mousedown", flap);
-        window.addEventListener("touchstart", (e) => { e.preventDefault(); flap(); });
+        window.addEventListener("touchstart", flap, {passive: false});
 
         function resetGame() {
-            player.y = 300;
+            player.y = canvas.height / 2;
             player.velocity = 0;
             obstacles = [];
             particles = [];
             score = 0;
             frameCount = 0;
-            gameSpeed = 3.5;
-            scoreDisplay.innerText = "0";
+            gameSpeed = 3.8;
+            currentThemeIndex = 0;
+            updateUIScores();
+            applyTheme();
+        }
+
+        // スコアに基づきテーマと速度を更新
+        function checkProgress() {
+            const nextThemeIndex = Math.floor(score / 10);
+            if (nextThemeIndex !== currentThemeIndex) {
+                currentThemeIndex = nextThemeIndex;
+                applyTheme();
+                // Phaseアップ時の演出
+                createExplosion(canvas.width / 2, canvas.height / 2, "#fff", 30);
+                msg.innerText = "PHASE " + (currentThemeIndex + 1);
+                setTimeout(() => { if(gameActive) msg.innerText = ""; }, 1000);
+            }
+            // 速度アップ
+            gameSpeed = 3.8 + (score * 0.08); 
+        }
+
+        // UIと背景色の更新
+        function applyTheme() {
+            const theme = getTheme();
+            levelDisplay.innerText = "PHASE " + (currentThemeIndex + 1);
+            levelDisplay.style.color = theme.primary;
+            scoreDisplay.style.color = theme.primary;
+            // プレイヤーとUIの影
+            scoreDisplay.style.textShadow = `0 0 15px ${theme.primary}`;
+            // <body>の背景色を変更（CSSのtransitionで滑らかに）
+            document.body.style.background = theme.bgBottom;
+        }
+
+        function updateUIScores() {
+            scoreDisplay.innerText = score;
         }
 
         function spawnObstacle() {
-            const gap = Math.max(120, 160 - score); // スコアが上がると隙間が狭くなる
+            const gap = Math.max(120, 160 - score); // 10点ごとに狭く
             const minH = 60;
             const h = Math.floor(Math.random() * (canvas.height - gap - minH * 2)) + minH;
             obstacles.push({
-                x: canvas.width,
-                top: h,
+                x: canvas.width, top: h,
                 bottom: canvas.height - h - gap,
-                width: 55,
-                passed: false
+                width: 55, passed: false
             });
         }
 
         function update() {
-            if (!gameActive) {
-                // 待機画面でもパーティクルだけ動かす
-                particles.forEach((p, i) => { p.update(); if(p.life <= 0) particles.splice(i, 1); });
-                return;
-            }
+            particles.forEach((p, i) => { p.update(); if(p.life <= 0) particles.splice(i, 1); });
 
-            // 難易度調整
-            gameSpeed = 3.5 + (score * 0.1); 
-            const spawnRate = Math.max(50, 90 - Math.floor(score / 2));
+            if (!gameActive) return;
 
+            // スコアとテーマのチェック
+            checkProgress();
+            
             player.velocity += player.gravity;
             player.y += player.velocity;
 
@@ -167,7 +228,10 @@
                 gameOver();
             }
 
+            const spawnRate = Math.max(45, 80 - Math.floor(score / 1.5));
             if (frameCount % spawnRate === 0) spawnObstacle();
+
+            const theme = getTheme();
 
             obstacles.forEach((ob, i) => {
                 ob.x -= gameSpeed;
@@ -181,49 +245,59 @@
                 if (!ob.passed && player.x > ob.x + ob.width) {
                     score++;
                     ob.passed = true;
-                    scoreDisplay.innerText = score;
-                    createExplosion(player.x, player.y, "#fff"); // 通過時に白火花
+                    updateUIScores();
+                    // 通過時はPrimaryカラーの派手な演出
+                    createExplosion(player.x + player.w, player.y + player.h / 2, theme.primary, 8);
                 }
 
                 if (ob.x + ob.width < 0) obstacles.splice(i, 1);
-            });
-
-            particles.forEach((p, i) => {
-                p.update();
-                if (p.life <= 0) particles.splice(i, 1);
             });
 
             frameCount++;
         }
 
         function draw() {
-            ctx.fillStyle = "#000";
+            const theme = getTheme();
+
+            // 背景グラデーションの描画
+            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            gradient.addColorStop(0, theme.bgTop);
+            gradient.addColorStop(1, theme.bgBottom);
+            ctx.fillStyle = gradient;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // 障害物の描画
-            ctx.shadowBlur = 15;
+            ctx.shadowBlur = 15; // ネオン効果
+
+            // 障害物の描画 (Secondary Color)
+            ctx.fillStyle = theme.secondary;
+            ctx.shadowColor = theme.secondary;
             obstacles.forEach(ob => {
-                ctx.fillStyle = "#f0f";
-                ctx.shadowColor = "#f0f";
-                ctx.fillRect(ob.x, 0, ob.width, ob.top);
-                ctx.fillRect(ob.x, canvas.height - ob.bottom, ob.width, ob.bottom);
+                ctx.fillRect(ob.x, 0, ob.width, ob.top); // 上
+                ctx.fillRect(ob.x, canvas.height - ob.bottom, ob.width, ob.bottom); // 下
             });
 
-            // プレイヤーの描画
-            ctx.fillStyle = "#0ff";
-            ctx.shadowColor = "#0ff";
+            // プレイヤーの描画 (Primary Color)
+            ctx.fillStyle = theme.primary;
+            ctx.shadowColor = theme.primary;
             ctx.fillRect(player.x, player.y, player.w, player.h);
 
             // パーティクルの描画
             particles.forEach(p => p.draw());
 
-            ctx.shadowBlur = 0;
+            ctx.shadowBlur = 0; // リセット
         }
 
         function gameOver() {
-            createExplosion(player.x, player.y, "#ff0");
+            if (!gameActive) return; // 重複防止
             gameActive = false;
-            msg.innerText = "GAME OVER\nSCORE: " + score + "\nRESTART";
+            const theme = getTheme();
+            // ミス時は Primary と Secondary の混合爆発
+            createExplosion(player.x, player.y, theme.primary, 20);
+            createExplosion(player.x, player.y, theme.secondary, 20);
+            msg.innerText = `GAME OVER\nPHASE: ${currentThemeIndex+1}\nSCORE: ${score}\n>> RESTART <<`;
+            // スコアを少し赤くする
+            scoreDisplay.style.color = "#ff4444";
+            scoreDisplay.style.textShadow = `0 0 15px #ff0000`;
         }
 
         function loop() {
@@ -231,6 +305,9 @@
             draw();
             requestAnimationFrame(loop);
         }
+
+        // 初期化
+        resetGame();
         loop();
     </script>
 </body>
