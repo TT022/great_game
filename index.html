@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+
+<style id="webmakerstyle">
+
+</style>
+</head>
+<body>
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NEON SLIDE - 神ゲー</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #111;
+            font-family: 'Arial', sans-serif;
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        canvas {
+            border: 4px solid #0ff;
+            box-shadow: 0 0 20px #0ff;
+            background: #000;
+        }
+        #ui {
+            position: absolute;
+            text-align: center;
+            pointer-events: none;
+        }
+        .start-msg {
+            font-size: 24px;
+            text-shadow: 0 0 10px #0ff;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <div id="msg" class="start-msg">CLICK TO START</div>
+        <div id="scoreDisplay" style="font-size: 40px; font-weight: bold;"></div>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const scoreDisplay = document.getElementById("scoreDisplay");
+        const msg = document.getElementById("msg");
+
+        // キャンバスサイズ設定
+        canvas.width = 400;
+        canvas.height = 600;
+
+        // ゲーム変数
+        let bird = { x: 50, y: 300, w: 20, h: 20, gravity: 0.4, velocity: 0 };
+        let pipes = [];
+        let score = 0;
+        let gameActive = false;
+        let frameCount = 0;
+
+        // 操作設定
+        function flap() {
+            if (!gameActive) {
+                resetGame();
+                gameActive = true;
+                msg.innerText = "";
+            }
+            bird.velocity = -7;
+        }
+
+        window.addEventListener("mousedown", flap);
+        window.addEventListener("touchstart", (e) => { e.preventDefault(); flap(); });
+
+        function resetGame() {
+            bird.y = 300;
+            bird.velocity = 0;
+            pipes = [];
+            score = 0;
+            frameCount = 0;
+            scoreDisplay.innerText = "0";
+        }
+
+        function createPipe() {
+            const gap = 150; // 隙間の広さ
+            const minHeight = 50;
+            const height = Math.floor(Math.random() * (canvas.height - gap - minHeight * 2)) + minHeight;
+            pipes.push({
+                x: canvas.width,
+                top: height,
+                bottom: canvas.height - height - gap,
+                width: 50,
+                passed: false
+            });
+        }
+
+        function update() {
+            if (!gameActive) return;
+
+            // 重力
+            bird.velocity += bird.gravity;
+            bird.y += bird.velocity;
+
+            // 土台/天井判定
+            if (bird.y + bird.h > canvas.height || bird.y < 0) {
+                gameOver();
+            }
+
+            // 土管の生成
+            if (frameCount % 90 === 0) {
+                createPipe();
+            }
+
+            // 土管の移動
+            pipes.forEach((pipe, index) => {
+                pipe.x -= 3; // スピード
+
+                // 当たり判定
+                if (
+                    bird.x < pipe.x + pipe.width &&
+                    bird.x + bird.w > pipe.x &&
+                    (bird.y < pipe.top || bird.y + bird.h > canvas.height - pipe.bottom)
+                ) {
+                    gameOver();
+                }
+
+                // スコア加算
+                if (!pipe.passed && bird.x > pipe.x + pipe.width) {
+                    score++;
+                    pipe.passed = true;
+                    scoreDisplay.innerText = score;
+                }
+
+                // 画面外の土管削除
+                if (pipe.x + pipe.width < 0) {
+                    pipes.splice(index, 1);
+                }
+            });
+
+            frameCount++;
+        }
+
+        function draw() {
+            // 背景クリア
+            ctx.fillStyle = "black";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 自機の描画（ネオンブルー）
+            ctx.fillStyle = "#0ff";
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = "#0ff";
+            ctx.fillRect(bird.x, bird.y, bird.w, bird.h);
+
+            // 土管の描画（ネオンピンク）
+            ctx.fillStyle = "#f0f";
+            ctx.shadowColor = "#f0f";
+            pipes.forEach(pipe => {
+                ctx.fillRect(pipe.x, 0, pipe.width, pipe.top);
+                ctx.fillRect(pipe.x, canvas.height - pipe.bottom, pipe.width, pipe.bottom);
+            });
+
+            ctx.shadowBlur = 0; // 他に影響が出ないようリセット
+        }
+
+        function gameOver() {
+            gameActive = false;
+            msg.innerText = "GAME OVER\nCLICK TO RESTART";
+        }
+
+        function loop() {
+            update();
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        loop();
+    </script>
+</body>
+</html>
+
+
+</body>
+</html>
