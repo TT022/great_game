@@ -12,167 +12,218 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NEON SLIDE - 神ゲー</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>NEON SLIDE PRO - 神ゲー</title>
     <style>
         body {
             margin: 0;
             overflow: hidden;
-            background: #111;
-            font-family: 'Arial', sans-serif;
+            background: #050505;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             color: white;
             display: flex;
             justify-content: center;
             align-items: center;
             height: 100vh;
+            touch-action: manipulation;
         }
         canvas {
-            border: 4px solid #0ff;
-            box-shadow: 0 0 20px #0ff;
-            background: #000;
+            border: 2px solid #0ff;
+            box-shadow: 0 0 30px rgba(0, 255, 255, 0.2);
         }
         #ui {
             position: absolute;
             text-align: center;
             pointer-events: none;
+            width: 100%;
         }
-        .start-msg {
-            font-size: 24px;
+        .msg {
+            font-size: 20px;
             text-shadow: 0 0 10px #0ff;
+            letter-spacing: 2px;
+        }
+        #score {
+            font-size: 60px;
+            font-weight: 900;
+            opacity: 0.5;
+            margin-bottom: 20px;
         }
     </style>
 </head>
 <body>
 
     <div id="ui">
-        <div id="msg" class="start-msg">CLICK TO START</div>
-        <div id="scoreDisplay" style="font-size: 40px; font-weight: bold;"></div>
+        <div id="score">0</div>
+        <div id="msg" class="msg">CLICK TO START</div>
     </div>
     <canvas id="gameCanvas"></canvas>
 
     <script>
         const canvas = document.getElementById("gameCanvas");
         const ctx = canvas.getContext("2d");
-        const scoreDisplay = document.getElementById("scoreDisplay");
+        const scoreDisplay = document.getElementById("score");
         const msg = document.getElementById("msg");
 
-        // キャンバスサイズ設定
         canvas.width = 400;
         canvas.height = 600;
 
-        // ゲーム変数
-        let bird = { x: 50, y: 300, w: 20, h: 20, gravity: 0.4, velocity: 0 };
-        let pipes = [];
-        let score = 0;
         let gameActive = false;
+        let score = 0;
         let frameCount = 0;
+        let gameSpeed = 3.5;
 
-        // 操作設定
+        let player = {
+            x: 60, y: 300, w: 24, h: 24,
+            gravity: 0.45, velocity: 0, jump: -7.5
+        };
+
+        let obstacles = [];
+        let particles = [];
+
+        // --- パーティクルクラス ---
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.size = Math.random() * 4 + 1;
+                this.speedX = (Math.random() - 0.5) * 8;
+                this.speedY = (Math.random() - 0.5) * 8;
+                this.color = color;
+                this.life = 1.0;
+            }
+            update() {
+                this.x += this.speedX;
+                this.y += this.speedY;
+                this.life -= 0.02;
+            }
+            draw() {
+                ctx.globalAlpha = this.life;
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x, this.y, this.size, this.size);
+                ctx.globalAlpha = 1.0;
+            }
+        }
+
+        function createExplosion(x, y, color) {
+            for (let i = 0; i < 15; i++) {
+                particles.push(new Particle(x, y, color));
+            }
+        }
+
+        // --- ゲームロジック ---
         function flap() {
             if (!gameActive) {
                 resetGame();
                 gameActive = true;
                 msg.innerText = "";
             }
-            bird.velocity = -7;
+            player.velocity = player.jump;
+            // ジャンプ時に少しパーティクルを出す
+            for(let i=0; i<3; i++) particles.push(new Particle(player.x, player.y + player.h, "#0ff"));
         }
 
         window.addEventListener("mousedown", flap);
         window.addEventListener("touchstart", (e) => { e.preventDefault(); flap(); });
 
         function resetGame() {
-            bird.y = 300;
-            bird.velocity = 0;
-            pipes = [];
+            player.y = 300;
+            player.velocity = 0;
+            obstacles = [];
+            particles = [];
             score = 0;
             frameCount = 0;
+            gameSpeed = 3.5;
             scoreDisplay.innerText = "0";
         }
 
-        function createPipe() {
-            const gap = 150; // 隙間の広さ
-            const minHeight = 50;
-            const height = Math.floor(Math.random() * (canvas.height - gap - minHeight * 2)) + minHeight;
-            pipes.push({
+        function spawnObstacle() {
+            const gap = Math.max(120, 160 - score); // スコアが上がると隙間が狭くなる
+            const minH = 60;
+            const h = Math.floor(Math.random() * (canvas.height - gap - minH * 2)) + minH;
+            obstacles.push({
                 x: canvas.width,
-                top: height,
-                bottom: canvas.height - height - gap,
-                width: 50,
+                top: h,
+                bottom: canvas.height - h - gap,
+                width: 55,
                 passed: false
             });
         }
 
         function update() {
-            if (!gameActive) return;
+            if (!gameActive) {
+                // 待機画面でもパーティクルだけ動かす
+                particles.forEach((p, i) => { p.update(); if(p.life <= 0) particles.splice(i, 1); });
+                return;
+            }
 
-            // 重力
-            bird.velocity += bird.gravity;
-            bird.y += bird.velocity;
+            // 難易度調整
+            gameSpeed = 3.5 + (score * 0.1); 
+            const spawnRate = Math.max(50, 90 - Math.floor(score / 2));
 
-            // 土台/天井判定
-            if (bird.y + bird.h > canvas.height || bird.y < 0) {
+            player.velocity += player.gravity;
+            player.y += player.velocity;
+
+            if (player.y + player.h > canvas.height || player.y < 0) {
                 gameOver();
             }
 
-            // 土管の生成
-            if (frameCount % 90 === 0) {
-                createPipe();
-            }
+            if (frameCount % spawnRate === 0) spawnObstacle();
 
-            // 土管の移動
-            pipes.forEach((pipe, index) => {
-                pipe.x -= 3; // スピード
+            obstacles.forEach((ob, i) => {
+                ob.x -= gameSpeed;
 
                 // 当たり判定
-                if (
-                    bird.x < pipe.x + pipe.width &&
-                    bird.x + bird.w > pipe.x &&
-                    (bird.y < pipe.top || bird.y + bird.h > canvas.height - pipe.bottom)
-                ) {
+                if (player.x < ob.x + ob.width && player.x + player.w > ob.x &&
+                    (player.y < ob.top || player.y + player.h > canvas.height - ob.bottom)) {
                     gameOver();
                 }
 
-                // スコア加算
-                if (!pipe.passed && bird.x > pipe.x + pipe.width) {
+                if (!ob.passed && player.x > ob.x + ob.width) {
                     score++;
-                    pipe.passed = true;
+                    ob.passed = true;
                     scoreDisplay.innerText = score;
+                    createExplosion(player.x, player.y, "#fff"); // 通過時に白火花
                 }
 
-                // 画面外の土管削除
-                if (pipe.x + pipe.width < 0) {
-                    pipes.splice(index, 1);
-                }
+                if (ob.x + ob.width < 0) obstacles.splice(i, 1);
+            });
+
+            particles.forEach((p, i) => {
+                p.update();
+                if (p.life <= 0) particles.splice(i, 1);
             });
 
             frameCount++;
         }
 
         function draw() {
-            // 背景クリア
-            ctx.fillStyle = "black";
+            ctx.fillStyle = "#000";
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // 自機の描画（ネオンブルー）
-            ctx.fillStyle = "#0ff";
+            // 障害物の描画
             ctx.shadowBlur = 15;
-            ctx.shadowColor = "#0ff";
-            ctx.fillRect(bird.x, bird.y, bird.w, bird.h);
-
-            // 土管の描画（ネオンピンク）
-            ctx.fillStyle = "#f0f";
-            ctx.shadowColor = "#f0f";
-            pipes.forEach(pipe => {
-                ctx.fillRect(pipe.x, 0, pipe.width, pipe.top);
-                ctx.fillRect(pipe.x, canvas.height - pipe.bottom, pipe.width, pipe.bottom);
+            obstacles.forEach(ob => {
+                ctx.fillStyle = "#f0f";
+                ctx.shadowColor = "#f0f";
+                ctx.fillRect(ob.x, 0, ob.width, ob.top);
+                ctx.fillRect(ob.x, canvas.height - ob.bottom, ob.width, ob.bottom);
             });
 
-            ctx.shadowBlur = 0; // 他に影響が出ないようリセット
+            // プレイヤーの描画
+            ctx.fillStyle = "#0ff";
+            ctx.shadowColor = "#0ff";
+            ctx.fillRect(player.x, player.y, player.w, player.h);
+
+            // パーティクルの描画
+            particles.forEach(p => p.draw());
+
+            ctx.shadowBlur = 0;
         }
 
         function gameOver() {
+            createExplosion(player.x, player.y, "#ff0");
             gameActive = false;
-            msg.innerText = "GAME OVER\nCLICK TO RESTART";
+            msg.innerText = "GAME OVER\nSCORE: " + score + "\nRESTART";
         }
 
         function loop() {
@@ -180,7 +231,6 @@
             draw();
             requestAnimationFrame(loop);
         }
-
         loop();
     </script>
 </body>
